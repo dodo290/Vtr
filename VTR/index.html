@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Try-On</title>
+
+  <style>
+    html,body{
+      height:100%;margin:0;background:#000;font-family:Arial;color:#fff;
+    }
+    .wrap{
+      position:relative;width:100%;height:100vh;overflow:hidden;
+      display:flex;align-items:center;justify-content:center;background:#000;
+    }
+    video#camera{
+      width:100%;height:100%;object-fit:cover;
+      transform:scaleX(-1);
+    }
+    canvas#overlay{
+      position:absolute;left:0;top:0;width:100%;height:100%;
+      pointer-events:none;transform:scaleX(-1);
+    }
+    .thumbs{
+      position:absolute;left:50%;bottom:28px;transform:translateX(-50%);
+      display:flex;gap:14px;align-items:center;padding:6px 10px;
+      backdrop-filter:blur(6px);background:rgba(0,0,0,0.25);
+      border-radius:999px;z-index:40;
+    }
+    .thumb{
+      width:70px;height:70px;border-radius:50%;overflow:hidden;
+      border:3px solid rgba(255,255,255,0.12);
+      display:flex;align-items:center;justify-content:center;
+      background:#111;cursor:pointer;transition:.2s;
+    }
+    .thumb img{max-width:60px;max-height:60px;}
+    .thumb.selected{border-color:#ff7a18;transform:translateY(-6px);}
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <video id="camera" autoplay playsinline muted></video>
+    <canvas id="overlay"></canvas>
+
+    <div class="thumbs" id="thumbs">
+      <div class="thumb selected" id="frameBtn">
+        <img src="img/d2a.png" alt="frame">
+      </div>
+    </div>
+  </div>
+
+  <!-- MediaPipe -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <script>
+    const video = document.getElementById('camera');
+    const canvas = document.getElementById('overlay');
+    const ctx = canvas.getContext('2d');
+
+    let currentFrameImg = null;
+
+    // Load glasses image
+    function loadFrame(){
+      const img = new Image();
+      img.onload = () => {
+        console.log("FRAME LOADED ✔");
+        currentFrameImg = img;
+      };
+      img.onerror = () => console.log("❌ FRAME NOT FOUND:", img.src);
+      img.src = "img/d2a.png"; // الصورة الحقيقية
+    }
+    loadFrame();
+
+    // MediaPipe setup
+    const faceMesh = new FaceMesh({
+      locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`
+    });
+
+    faceMesh.setOptions({
+      maxNumFaces: 1,
+      refineLandmarks: true,
+      minDetectionConfidence: 0.6,
+      minTrackingConfidence: 0.6
+    });
+
+    faceMesh.onResults(onResults);
+
+    // Start camera
+    async function startCamera() {
+      const constraints = {
+        video: { facingMode: "user", width: 1280, height: 720 },
+        audio: false
+      };
+
+      const camera = new Camera(video, {
+        onFrame: async () => { await faceMesh.send({ image: video }); },
+        width: 1280, height: 720
+      });
+
+      camera.start();
+    }
+    startCamera();
+
+    function fitCanvas(){
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+    }
+
+    function lmToPoint(lm){
+      return { x: lm.x * canvas.width, y: lm.y * canvas.height };
+    }
+
+    function onResults(results){
+      fitCanvas();
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+
+      if(!results.multiFaceLandmarks || !results.multiFaceLandmarks.length) return;
+
+      const lm = results.multiFaceLandmarks[0];
+
+      const left = lm[33];
+      const right = lm[263];
+      const mid = { x:(left.x+right.x)/2, y:(left.y+right.y)/2 };
+
+      const pLeft = lmToPoint(left);
+      const pRight = lmToPoint(right);
+      const pMid = lmToPoint(mid);
+
+      const dx = pRight.x - pLeft.x;
+      const dy = pRight.y - pLeft.y;
+      const eyeDist = Math.hypot(dx, dy);
+      const angle = Math.atan2(dy, dx);
+
+      if(currentFrameImg){
+        const imgW = eyeDist * 2.5;
+        const aspect = currentFrameImg.height / currentFrameImg.width;
+        const imgH = imgW * aspect;
+
+        ctx.save();
+        ctx.translate(pMid.x, pMid.y - imgH * 0.12);
+        ctx.rotate(angle);
+        ctx.drawImage(currentFrameImg, -imgW/2, -imgH/2, imgW, imgH);
+        ctx.restore();
+      }
+    }
+
+  </script>
+
+</body>
+</html>
